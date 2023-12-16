@@ -702,15 +702,9 @@ impl<'t> TextEdit<'t> {
                             // so only set it when text is editable and visible!
                             // But `winit` and `egui_web` differs in how to set the
                             // position of IME.
-                            if cfg!(target_arch = "wasm32") {
-                                ui.ctx().output_mut(|o| {
-                                    o.text_cursor_pos = Some(cursor_pos.left_top());
-                                });
-                            } else {
-                                ui.ctx().output_mut(|o| {
-                                    o.text_cursor_pos = Some(cursor_pos.left_bottom());
-                                });
-                            }
+                            ui.ctx().output_mut(|o| {
+                                o.text_cursor_area = Some(cursor_pos);
+                            });
                         }
                     }
                 }

@@ -19,7 +19,7 @@ impl GlutinWindowContext {
     #[allow(unsafe_code)]
     unsafe fn new(event_loop: &winit::event_loop::EventLoopWindowTarget<UserEvent>) -> Self {
         use egui::NumExt;
-        use glutin::context::NotCurrentGlContextSurfaceAccessor;
+        use glutin::context::NotCurrentGlContext;
         use glutin::display::GetGlDisplay;
         use glutin::display::GlDisplay;
         use glutin::prelude::GlSurface;
@@ -42,7 +42,7 @@ impl GlutinWindowContext {
         log::debug!("trying to get gl_config");
         let (mut window, gl_config) =
             glutin_winit::DisplayBuilder::new() // let glutin-winit helper crate handle the complex parts of opengl context creation
-                .with_preference(glutin_winit::ApiPrefence::FallbackEgl) // https://github.com/emilk/egui/issues/2520#issuecomment-1367841150
+                .with_preference(glutin_winit::ApiPreference::FallbackEgl) // https://github.com/emilk/egui/issues/2520#issuecomment-1367841150
                 .with_window_builder(Some(winit_window_builder.clone()))
                 .build(
                     event_loop,
@@ -150,7 +150,9 @@ pub enum UserEvent {
 fn main() {
     let mut clear_color = [0.1, 0.1, 0.1];
 
-    let event_loop = winit::event_loop::EventLoopBuilder::<UserEvent>::with_user_event().build();
+    let event_loop = winit::event_loop::EventLoopBuilder::<UserEvent>::with_user_event()
+        .build()
+        .unwrap();
     let (gl_window, gl) = create_display(&event_loop);
     let gl = std::sync::Arc::new(gl);
 
@@ -168,95 +170,94 @@ fn main() {
 
     let mut repaint_delay = std::time::Duration::MAX;
 
-    event_loop.run(move |event, _, control_flow| {
-        let mut redraw = || {
-            let mut quit = false;
+    event_loop
+        .run(move |event, target| {
+            let mut redraw = || {
+                let mut quit = false;
 
-            egui_glow.run(gl_window.window(), |egui_ctx| {
-                egui::SidePanel::left("my_side_panel").show(egui_ctx, |ui| {
-                    ui.heading("Hello World!");
-                    if ui.button("Quit").clicked() {
-                        quit = true;
-                    }
-                    ui.color_edit_button_rgb(&mut clear_color);
+                egui_glow.run(gl_window.window(), |egui_ctx| {
+                    egui::SidePanel::left("my_side_panel").show(egui_ctx, |ui| {
+                        ui.heading("Hello World!");
+                        if ui.button("Quit").clicked() {
+                            quit = true;
+                        }
+                        ui.color_edit_button_rgb(&mut clear_color);
+                    });
                 });
-            });
 
-            *control_flow = if quit {
-                winit::event_loop::ControlFlow::Exit
-            } else if repaint_delay.is_zero() {
-                gl_window.window().request_redraw();
-                winit::event_loop::ControlFlow::Poll
-            } else if let Some(repaint_delay_instant) =
-                std::time::Instant::now().checked_add(repaint_delay)
-            {
-                winit::event_loop::ControlFlow::WaitUntil(repaint_delay_instant)
-            } else {
-                winit::event_loop::ControlFlow::Wait
+                if quit {
+                    target.exit();
+                } else {
+                    target.set_control_flow(if repaint_delay.is_zero() {
+                        gl_window.window().request_redraw();
+
+                        winit::event_loop::ControlFlow::Poll
+                    } else if let Some(repaint_delay_instant) =
+                        std::time::Instant::now().checked_add(repaint_delay)
+                    {
+                        winit::event_loop::ControlFlow::WaitUntil(repaint_delay_instant)
+                    } else {
+                        winit::event_loop::ControlFlow::Wait
+                    });
+                }
+
+                {
+                    unsafe {
+                        use glow::HasContext as _;
+                        gl.clear_color(clear_color[0], clear_color[1], clear_color[2], 1.0);
+                        gl.clear(glow::COLOR_BUFFER_BIT);
+                    }
+
+                    // draw things behind egui here
+
+                    egui_glow.paint(gl_window.window());
+
+                    // draw things on top of egui here
+
+                    gl_window.swap_buffers().unwrap();
+                    gl_window.window().set_visible(true);
+                }
             };
 
-            {
-                unsafe {
-                    use glow::HasContext as _;
-                    gl.clear_color(clear_color[0], clear_color[1], clear_color[2], 1.0);
-                    gl.clear(glow::COLOR_BUFFER_BIT);
+            match event {
+                // Platform-dependent event handlers to workaround a winit bug
+                // See: https://github.com/rust-windowing/winit/issues/987
+                // See: https://github.com/rust-windowing/winit/issues/1619
+                winit::event::Event::AboutToWait => redraw(),
+
+                winit::event::Event::WindowEvent { event, .. } => {
+                    use winit::event::WindowEvent;
+                    if matches!(event, WindowEvent::CloseRequested | WindowEvent::Destroyed) {
+                        target.exit();
+                    }
+
+                    if let winit::event::WindowEvent::Resized(physical_size) = &event {
+                        gl_window.resize(*physical_size);
+                    }
+
+                    let event_response = egui_glow.on_window_event(gl_window.window(), &event);
+
+                    if event_response.repaint {
+                        gl_window.window().request_redraw();
+                    }
                 }
 
-                // draw things behind egui here
-
-                egui_glow.paint(gl_window.window());
-
-                // draw things on top of egui here
-
-                gl_window.swap_buffers().unwrap();
-                gl_window.window().set_visible(true);
-            }
-        };
-
-        match event {
-            // Platform-dependent event handlers to workaround a winit bug
-            // See: https://github.com/rust-windowing/winit/issues/987
-            // See: https://github.com/rust-windowing/winit/issues/1619
-            winit::event::Event::RedrawEventsCleared if cfg!(target_os = "windows") => redraw(),
-            winit::event::Event::RedrawRequested(_) if !cfg!(target_os = "windows") => redraw(),
-
-            winit::event::Event::WindowEvent { event, .. } => {
-                use winit::event::WindowEvent;
-                if matches!(event, WindowEvent::CloseRequested | WindowEvent::Destroyed) {
-                    *control_flow = winit::event_loop::ControlFlow::Exit;
+                winit::event::Event::UserEvent(UserEvent::Redraw(delay)) => {
+                    repaint_delay = delay;
                 }
-
-                if let winit::event::WindowEvent::Resized(physical_size) = &event {
-                    gl_window.resize(*physical_size);
-                } else if let winit::event::WindowEvent::ScaleFactorChanged {
-                    new_inner_size, ..
-                } = &event
-                {
-                    gl_window.resize(**new_inner_size);
+                winit::event::Event::LoopExiting => {
+                    egui_glow.destroy();
                 }
-
-                let event_response = egui_glow.on_window_event(gl_window.window(), &event);
-
-                if event_response.repaint {
+                winit::event::Event::NewEvents(winit::event::StartCause::ResumeTimeReached {
+                    ..
+                }) => {
                     gl_window.window().request_redraw();
                 }
-            }
 
-            winit::event::Event::UserEvent(UserEvent::Redraw(delay)) => {
-                repaint_delay = delay;
+                _ => (),
             }
-            winit::event::Event::LoopDestroyed => {
-                egui_glow.destroy();
-            }
-            winit::event::Event::NewEvents(winit::event::StartCause::ResumeTimeReached {
-                ..
-            }) => {
-                gl_window.window().request_redraw();
-            }
-
-            _ => (),
-        }
-    });
+        })
+        .unwrap();
 }
 
 fn create_display(

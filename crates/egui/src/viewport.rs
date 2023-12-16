@@ -69,7 +69,7 @@
 
 use std::sync::Arc;
 
-use epaint::{Pos2, Vec2};
+use epaint::{Pos2, Rect, Vec2};
 
 use crate::{Context, Id};
 
@@ -899,7 +899,7 @@ pub enum ViewportCommand {
     /// The the window icon.
     Icon(Option<Arc<IconData>>),
 
-    IMEPosition(Pos2),
+    IMEArea(Rect),
     IMEAllowed(bool),
     IMEPurpose(IMEPurpose),
 

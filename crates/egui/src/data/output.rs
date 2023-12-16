@@ -101,7 +101,7 @@ pub struct PlatformOutput {
     /// Screen-space position of text edit cursor (used for IME).
     ///
     /// Iff `Some`, the user is editing text.
-    pub text_cursor_pos: Option<crate::Pos2>,
+    pub text_cursor_area: Option<crate::Rect>,
 
     /// The difference in the widget tree since last frame.
     ///
@@ -137,7 +137,7 @@ impl PlatformOutput {
             copied_text,
             mut events,
             mutable_text_under_cursor,
-            text_cursor_pos,
+            text_cursor_area,
             #[cfg(feature = "accesskit")]
             accesskit_update,
         } = newer;
@@ -151,7 +151,7 @@ impl PlatformOutput {
         }
         self.events.append(&mut events);
         self.mutable_text_under_cursor = mutable_text_under_cursor;
-        self.text_cursor_pos = text_cursor_pos.or(self.text_cursor_pos);
+        self.text_cursor_area = text_cursor_area.or(self.text_cursor_area);
 
         #[cfg(feature = "accesskit")]
         {
